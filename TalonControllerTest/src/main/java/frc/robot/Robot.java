@@ -14,6 +14,10 @@ import com.ctre.phoenix.motorcontrol.StatusFrameEnhanced;
 import com.ctre.phoenix.motorcontrol.can.TalonSRX;
 import com.ctre.phoenix.motorcontrol.can.WPI_TalonSRX;
 
+import edu.wpi.cscore.UsbCamera;
+import edu.wpi.cscore.VideoSink;
+import edu.wpi.cscore.VideoSource.ConnectionStrategy;
+import edu.wpi.first.cameraserver.CameraServer;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.XboxController;
 import edu.wpi.first.wpilibj.GenericHID.Hand;
@@ -42,6 +46,10 @@ public class Robot extends TimedRobot {
   private final double _d = 0.0;
   private final double _f = 0.2;
   private double _ticksPerRevolution = 4096;
+  private boolean _camera1Selected = true;
+  private UsbCamera _camera1;
+  private UsbCamera _camera2;
+  private VideoSink _cameraServer;
 
   /**
    * This function is run when the robot is first started up and should be
@@ -88,6 +96,12 @@ public class Robot extends TimedRobot {
     
     /* Zero the sensor */
     _talon.getSelectedSensorPosition(_loopIndex);
+
+    _camera1 = CameraServer.getInstance().startAutomaticCapture(0);
+    _camera2 = CameraServer.getInstance().startAutomaticCapture(1);
+    _cameraServer = CameraServer.getInstance().getServer();
+    _camera1.setConnectionStrategy(ConnectionStrategy.kKeepOpen);
+    _cameraServer.setSource(_camera1);
   }
 
   /**
@@ -149,7 +163,10 @@ public class Robot extends TimedRobot {
   public void teleopPeriodic() {
     switch (_modeSelected) {
       case _motionMagicMode:
-        var targetPosition = -_controller.getY(Hand.kLeft) * 3 * _ticksPerRevolution;
+        var targetPosition = 0;
+        if (_controller.getAButton()){
+          targetPosition = -17000;
+        }
         _talon.set(ControlMode.MotionMagic, targetPosition);
         SmartDashboard.putNumber("Target Position", targetPosition);
         break;
@@ -163,6 +180,19 @@ public class Robot extends TimedRobot {
         break;
     }
     SmartDashboard.putNumber("EncoderPosition", _talon.getSelectedSensorPosition(_loopIndex));
+
+    if(_controller.getStickButtonPressed(Hand.kRight)){
+      _talon.getSensorCollection().setQuadraturePosition(0, 0);
+    }
+
+    if(_controller.getBumperPressed(Hand.kRight)){
+      _camera1Selected = !_camera1Selected;
+      if (_camera1Selected){
+        _cameraServer.setSource(_camera1);
+      } else {
+        _cameraServer.setSource(_camera2);
+      }
+    }
   }
 
   /**

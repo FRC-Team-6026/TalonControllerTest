@@ -9,6 +9,9 @@ package frc.robot;
 
 import com.ctre.phoenix.ParamEnum;
 import com.ctre.phoenix.motorcontrol.ControlMode;
+import com.ctre.phoenix.motorcontrol.FeedbackDevice;
+import com.ctre.phoenix.motorcontrol.StatusFrameEnhanced;
+import com.ctre.phoenix.motorcontrol.can.TalonSRX;
 import com.ctre.phoenix.motorcontrol.can.WPI_TalonSRX;
 
 import edu.wpi.first.wpilibj.TimedRobot;
@@ -25,12 +28,20 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
  * project.
  */
 public class Robot extends TimedRobot {
-  private static final String kDefaultAuto = "Default";
-  private static final String kCustomAuto = "My Auto";
-  private String m_autoSelected;
-  private final SendableChooser<String> m_chooser = new SendableChooser<>();
-  private final WPI_TalonSRX _talon = new WPI_TalonSRX(1);
+  private static final String _testMode = "Manual Test";
+  private static final String _motionMagicMode = "Motion Magic";
+  private String _modeSelected;
+  private final SendableChooser<String> _chooser = new SendableChooser<>();
+  private final TalonSRX _talon = new TalonSRX(1);
   private final XboxController _controller = new XboxController(0);
+  private final int _slotIndex = 0;
+  private final int _loopIndex = 0;
+  private final int _timeOutMs = 30;
+  private final double _p = 0.2;
+  private final double _i = 0.0;
+  private final double _d = 0.0;
+  private final double _f = 0.2;
+  private double _ticksPerRevolution = 4096;
 
   /**
    * This function is run when the robot is first started up and should be
@@ -38,11 +49,45 @@ public class Robot extends TimedRobot {
    */
   @Override
   public void robotInit() {
-    m_chooser.setDefaultOption("Default Auto", kDefaultAuto);
-    m_chooser.addOption("My Auto", kCustomAuto);
-    SmartDashboard.putData("Auto choices", m_chooser);
+    _chooser.setDefaultOption("Test Mode", _testMode);
+    _chooser.addOption("Motion Magic Mode", _motionMagicMode);
+    SmartDashboard.putData("Motion Mode", _chooser);
     _talon.configFactoryDefault();
-    _talon.configSetParameter(ParamEnum.eOpenloopRamp, 0.2, 0, 0);
+    _talon.configSelectedFeedbackSensor(FeedbackDevice.CTRE_MagEncoder_Relative,
+											_loopIndex, 
+                      _timeOutMs);
+                      
+    /**
+		 * Configure Talon SRX Output and Sensor direction accordingly
+		 * Invert Motor to have green LEDs when driving Talon Forward / Requesting Postiive Output
+		 * Phase sensor to have positive increment when driving Talon Forward (Green LED)
+		 */
+		_talon.setSensorPhase(false);
+    _talon.setInverted(true);
+    
+    /* Set relevant frame periods to be at least as fast as periodic rate */
+		_talon.setStatusFramePeriod(StatusFrameEnhanced.Status_13_Base_PIDF0, 10, _timeOutMs);
+    _talon.setStatusFramePeriod(StatusFrameEnhanced.Status_10_MotionMagic, 10, _timeOutMs);
+    
+    /* Set the peak and nominal outputs */
+		_talon.configNominalOutputForward(0, _timeOutMs);
+		_talon.configNominalOutputReverse(0, _timeOutMs);
+		_talon.configPeakOutputForward(1, _timeOutMs);
+    _talon.configPeakOutputReverse(-1, _timeOutMs);
+    
+    /* Set Motion Magic gains in slot0 - see documentation */
+		_talon.selectProfileSlot(_slotIndex, _loopIndex);
+		_talon.config_kF(_slotIndex, _f, _timeOutMs);
+		_talon.config_kP(_slotIndex, _p, _timeOutMs);
+		_talon.config_kI(_slotIndex, _i, _timeOutMs);
+    _talon.config_kD(_slotIndex, _d, _timeOutMs);
+    
+    /* Set acceleration and vcruise velocity - see documentation */
+		_talon.configMotionCruiseVelocity(10000, _timeOutMs);
+    _talon.configMotionAcceleration(3000, _timeOutMs);
+    
+    /* Zero the sensor */
+    _talon.getSelectedSensorPosition(_loopIndex);
   }
 
   /**
@@ -70,9 +115,9 @@ public class Robot extends TimedRobot {
    */
   @Override
   public void autonomousInit() {
-    m_autoSelected = m_chooser.getSelected();
+    _modeSelected = _chooser.getSelected();
     // m_autoSelected = SmartDashboard.getString("Auto Selector", kDefaultAuto);
-    System.out.println("Auto selected: " + m_autoSelected);
+    System.out.println("Auto selected: " + _modeSelected);
   }
 
   /**
@@ -80,15 +125,21 @@ public class Robot extends TimedRobot {
    */
   @Override
   public void autonomousPeriodic() {
-    switch (m_autoSelected) {
-      case kCustomAuto:
+    switch (_modeSelected) {
+      case _motionMagicMode:
         // Put custom auto code here
         break;
-      case kDefaultAuto:
+      case _testMode:
       default:
         // Put default auto code here
         break;
     }
+  }
+
+  @Override
+  public void teleopInit() {
+    _modeSelected = _chooser.getSelected();
+    super.teleopInit();
   }
 
   /**
@@ -96,7 +147,22 @@ public class Robot extends TimedRobot {
    */
   @Override
   public void teleopPeriodic() {
-    _talon.set(ControlMode.PercentOutput, _controller.getY(Hand.kLeft));
+    switch (_modeSelected) {
+      case _motionMagicMode:
+        var targetPosition = -_controller.getY(Hand.kLeft) * 3 * _ticksPerRevolution;
+        _talon.set(ControlMode.MotionMagic, targetPosition);
+        SmartDashboard.putNumber("Target Position", targetPosition);
+        break;
+      case _testMode:
+        var targetOutput = -_controller.getY(Hand.kLeft);
+        targetOutput = targetOutput < 0.05 && targetOutput > -0.05 ? 0 : targetOutput;
+        _talon.set(ControlMode.PercentOutput, targetOutput);
+        break;
+      default:
+        // Put default auto code here
+        break;
+    }
+    SmartDashboard.putNumber("EncoderPosition", _talon.getSelectedSensorPosition(_loopIndex));
   }
 
   /**
